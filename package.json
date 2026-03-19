@@ -1,0 +1,19 @@
+{
+  "name": "order-system-upgraded",
+  "version": "1.0.0",
+  "description": "TypeScript order splitter API aligned with the Ionixx backend challenge",
+  "main": "dist/src/index.js",
+  "author":"raghwendra",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/src/index.js",
+    "test": "npm run build && node --test dist/tests/*.test.js"
+  },
+  "dependencies": {
+    "decimal.js": "^10.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^5.9.3"
+  }
+}
