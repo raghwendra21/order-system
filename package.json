@@ -3,16 +3,19 @@
   "version": "1.0.0",
   "description": "TypeScript order splitter API aligned with the Ionixx backend challenge",
   "main": "dist/src/index.js",
-  "author":"raghwendra",
+  "author": "raghwendra",
   "scripts": {
     "build": "tsc",
     "start": "node dist/src/index.js",
-    "test": "npm run build && node --test dist/tests/*.test.js"
+    "test": "npm run build && node --test dist/tests/*.test.js",
+    "test:coverage": "npm run build && node --test --experimental-test-coverage dist/tests/*.test.js"
   },
   "dependencies": {
-    "decimal.js": "^10.4.3"
+    "decimal.js": "^10.4.3",
+    "luxon": "^3.7.2"
   },
   "devDependencies": {
+    "@types/luxon": "^3.7.1",
     "@types/node": "^25.5.0",
     "typescript": "^5.9.3"
   }

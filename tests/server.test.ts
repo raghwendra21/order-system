@@ -50,3 +50,33 @@ test('returns a 400 for invalid json and a 422 for invalid pagination', async ()
   const invalidPageResponse = await handleRequest('GET', '/api/orders?page=0');
   assert.equal(invalidPageResponse.statusCode, 422);
 });
+
+test('health endpoint returns ok', async () => {
+  const res = await handleRequest('GET', '/health');
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { status: 'ok' });
+});
+
+test('unknown routes return 404', async () => {
+  const res = await handleRequest('GET', '/api/unknown');
+  assert.equal(res.statusCode, 404);
+});
+
+test('POST /api/orders without body returns 422', async () => {
+  const res = await handleRequest('POST', '/api/orders');
+  assert.equal(res.statusCode, 422);
+  assert.match((res.body as { error: string }).error, /body is required/i);
+});
+
+test('POST /api/orders with invalid business rules returns 422', async () => {
+  const res = await handleRequest(
+    'POST',
+    '/api/orders',
+    JSON.stringify({
+      totalAmount: -1,
+      orderType: 'BUY',
+      modelPortfolio: [{ symbol: 'AAPL', weight: 100 }]
+    })
+  );
+  assert.equal(res.statusCode, 422);
+});

@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import { DateTime } from 'luxon';
 import { randomUUID } from 'node:crypto';
 import { config } from '../config';
 import {
@@ -9,24 +10,35 @@ import {
 } from '../types';
 
 function roundAmount(value: Decimal.Value): number {
-  return new Decimal(value).toDecimalPlaces(config.amountDecimals).toNumber();
+  return new Decimal(value).toDecimalPlaces(config.amountDecimals, Decimal.ROUND_HALF_UP).toNumber();
 }
 
-function getExecutionDate(now = new Date()): Date {
-  const executionDate = new Date(now);
-  executionDate.setHours(9, 30, 0, 0);
+/**
+ * Next regular-session open at {@link config.marketOpenHour}:{@link config.marketOpenMinute}
+ * in {@link config.marketTimezone}, strictly after `now`. Weekends are skipped.
+ * Uses zone-local calendar arithmetic (Luxon) to avoid DST boundary bugs from
+ * mixing local `Date#setHours` with UTC instants.
+ */
+export function getExecutionDate(now = new Date()): Date {
+  const zone = config.marketTimezone;
+  const instant = DateTime.fromMillis(now.getTime(), { zone });
+  let candidate = instant.set({
+    hour: config.marketOpenHour,
+    minute: config.marketOpenMinute,
+    second: 0,
+    millisecond: 0
+  });
 
-  // Keep moving forward until we land on the next tradable market window.
-  while (
-    executionDate.getDay() === 0 ||
-    executionDate.getDay() === 6 ||
-    executionDate <= now
-  ) {
-    executionDate.setDate(executionDate.getDate() + 1);
-    executionDate.setHours(9, 30, 0, 0);
+  while (candidate.weekday === 6 || candidate.weekday === 7 || candidate <= instant) {
+    candidate = candidate.plus({ days: 1 }).set({
+      hour: config.marketOpenHour,
+      minute: config.marketOpenMinute,
+      second: 0,
+      millisecond: 0
+    });
   }
 
-  return executionDate;
+  return candidate.toUTC().toJSDate();
 }
 
 function assertPortfolioWeights(portfolio: PortfolioItemInput[]): void {
@@ -35,7 +47,6 @@ function assertPortfolioWeights(portfolio: PortfolioItemInput[]): void {
     new Decimal(0)
   );
 
-  // A small tolerance avoids rejecting valid decimal inputs due to representation noise.
   if (totalWeight.minus(100).abs().greaterThan(config.weightTolerance)) {
     throw new Error(
       `Model portfolio weights must total 100 within a tolerance of ${config.weightTolerance}.`
@@ -79,41 +90,41 @@ function validateInput(input: CreateOrderInput): void {
   assertPortfolioWeights(input.modelPortfolio);
 }
 
-function resolvePrice(item: PortfolioItemInput): number {
-  const configuredPrice = config.defaultPrices[item.symbol.toUpperCase()];
-  const price = item.price ?? configuredPrice;
+function resolvePrice(item: PortfolioItemInput): Decimal {
+  const configured = config.defaultPrices[item.symbol.toUpperCase()];
+  const raw = item.price ?? configured ?? config.defaultPriceBase;
 
-  if (!price) {
+  if (raw === undefined || raw === null || !Number.isFinite(Number(raw)) || Number(raw) <= 0) {
     throw new Error(`No price available for symbol ${item.symbol}.`);
   }
 
-  return price;
+  return new Decimal(raw).toDecimalPlaces(config.amountDecimals, Decimal.ROUND_HALF_UP);
 }
 
-function buildBreakdown(input: CreateOrderInput): OrderBreakdownItem[] {
+function buildBreakdown(input: CreateOrderInput, totalAmount: Decimal): OrderBreakdownItem[] {
   let allocatedAmount = new Decimal(0);
+  const items = input.modelPortfolio;
 
-  return input.modelPortfolio.map((item, index) => {
-    const totalAmount = new Decimal(input.totalAmount);
-    const isLastItem = index === input.modelPortfolio.length - 1;
+  return items.map((item, index) => {
+    const isLastItem = index === items.length - 1;
 
-    // The final item absorbs any rounding remainder so the full order amount stays consistent.
     const amount = isLastItem
       ? totalAmount.minus(allocatedAmount)
-      : totalAmount.mul(item.weight).div(100).toDecimalPlaces(config.amountDecimals);
+      : totalAmount.mul(item.weight).div(100).toDecimalPlaces(config.amountDecimals, Decimal.ROUND_HALF_UP);
 
-    allocatedAmount = allocatedAmount.plus(amount);
+    if (!isLastItem) {
+      allocatedAmount = allocatedAmount.plus(amount);
+    }
 
-    const price = new Decimal(resolvePrice(item));
-    const quantity = amount.div(price).toDecimalPlaces(config.quantityDecimals);
+    const price = resolvePrice(item);
+    const quantity = amount.div(price).toDecimalPlaces(config.quantityDecimals, Decimal.ROUND_HALF_UP);
 
     return {
-      // We keep quantity positive and make the intended action explicit via side.
       side: input.orderType,
       symbol: item.symbol.toUpperCase(),
       weight: item.weight,
-      amount: roundAmount(amount),
-      price: roundAmount(price),
+      amount: amount.toNumber(),
+      price: price.toNumber(),
       quantity: quantity.toNumber()
     };
   });
@@ -122,16 +133,21 @@ function buildBreakdown(input: CreateOrderInput): OrderBreakdownItem[] {
 export function createOrder(input: CreateOrderInput, now = new Date()): StoredOrder {
   validateInput(input);
 
+  const totalAmount = new Decimal(input.totalAmount).toDecimalPlaces(
+    config.amountDecimals,
+    Decimal.ROUND_HALF_UP
+  );
+
   return {
     id: randomUUID(),
     orderType: input.orderType,
-    totalAmount: roundAmount(input.totalAmount),
+    totalAmount: totalAmount.toNumber(),
     modelPortfolio: input.modelPortfolio.map((item) => ({
       symbol: item.symbol.toUpperCase(),
       weight: item.weight,
       ...(item.price !== undefined ? { price: roundAmount(item.price) } : {})
     })),
-    breakdown: buildBreakdown(input),
+    breakdown: buildBreakdown(input, totalAmount),
     executionDate: getExecutionDate(now).toISOString(),
     createdAt: now.toISOString()
   };

@@ -1,6 +1,7 @@
 import http, { IncomingMessage, ServerResponse } from 'node:http';
 import { performance } from 'node:perf_hooks';
 import { config } from './config';
+import { logger } from './logger';
 import { createOrder } from './services/orderService';
 import { getOrders, saveOrder } from './store/orderStore';
 import { CreateOrderInput } from './types';
@@ -12,7 +13,7 @@ function sendJson(res: ServerResponse, statusCode: number, body: unknown): void 
 
 function logResponse(method: string, url: string, statusCode: number, startedAt: number): void {
   const durationMs = Math.round((performance.now() - startedAt) * 100) / 100;
-  console.log(`[HTTP] ${method} ${url} ${statusCode} ${durationMs}ms`);
+  logger.info(`${method} ${url} ${statusCode} ${durationMs}ms`);
 }
 
 function parsePositiveInteger(value: string | null, fallback: number): number {
@@ -102,8 +103,8 @@ export function createServer(): http.Server {
 export function startServer(): http.Server {
   const server = createServer();
   server.listen(config.port, () => {
-    console.log(`[BOOT] Order API listening on port ${config.port}`);
-    console.log(`[BOOT] Quantity decimals configured as ${config.quantityDecimals}`);
+    logger.info(`Order API listening on port ${config.port}`);
+    logger.info(`Quantity decimals configured as ${config.quantityDecimals}`);
   });
   return server;
 }
